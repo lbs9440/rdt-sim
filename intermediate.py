@@ -1,36 +1,61 @@
 import socket
 import random
 import time
-import struct
-
-BUFFER_SIZE = 2048
-PACKET_LOSS_RATE = 0.1
-REORDER_RATE = 0.1
-DELAY_RATE = 0.2
 
 class Intermediate:
-    def __init__(self, listen_address, receiver_address):
-        self.listen_address = listen_address
-        self.receiver_address = receiver_address
+    def __init__(self, sender_ip, sender_port, receiver_port, loss=False, reorder=False, corrupt=False):
+        self.sender_address = (sender_ip, sender_port)
+        self.receiver_address = ('127.0.0.1', receiver_port)
+        self.loss = loss
+        self.reorder = reorder
+        self.corrupt = corrupt
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(self.listen_address)
+        self.sock.bind(('127.0.0.1', receiver_port))  # Bind to a local port
 
-    def process_packets(self):
-        print("Intermediate server running...")
+    def introduce_loss(self, packet):
+        """Simulate packet loss based on probability."""
+        if self.loss and random.random() < 0.1:  # 10% packet loss
+            print("Packet lost")
+            return False
+        return True
+
+    def introduce_reordering(self, packets):
+        """Simulate packet reordering."""
+        if self.reorder and random.random() < 0.1:  # 10% chance to reorder
+            random.shuffle(packets)
+            print("Packets reordered")
+        return packets
+
+    def introduce_corruption(self, packet):
+        """Simulate packet corruption."""
+        if self.corrupt and random.random() < 0.1:  # 10% chance to corrupt
+            corrupted_packet = bytearray(packet)
+            corrupted_packet[random.randint(0, len(corrupted_packet) - 1)] ^= random.randint(1, 255)  # Random bit flip
+            print("Packet corrupted")
+            return bytes(corrupted_packet)
+        return packet
+
+    def forward_packets(self):
+        """Receives packets from sender and forwards to receiver (and vice versa)."""
         while True:
-            packet, sender_address = self.sock.recvfrom(BUFFER_SIZE)
-            seq_num = struct.unpack('!I', packet[:4])[0]
+            try:
+                packet, addr = self.sock.recvfrom(2048)
+                if addr == self.sender_address:
+                    # Packet from sender, forward to receiver
+                    if not self.introduce_loss(packet):
+                        continue
+                    packet = self.introduce_corruption(packet)
+                    self.sock.sendto(packet, self.receiver_address)
+                    print(f"Forwarded packet to receiver: {packet[:4]}")
 
-            if random.random() < PACKET_LOSS_RATE:
-                print(f"Packet {seq_num} lost!")
-                continue
+                elif addr == self.receiver_address:
+                    # Packet from receiver (ACK), forward to sender
+                    if not self.introduce_loss(packet):
+                        continue
+                    packet = self.introduce_corruption(packet)
+                    self.sock.sendto(packet, self.sender_address)
+                    print(f"Forwarded ACK to sender: {packet[:4]}")
 
-            if random.random() < REORDER_RATE:
-                time.sleep(0.5)
-                print(f"Packet {seq_num} delayed!")
-
-            self.sock.sendto(packet, self.receiver_address)
-
-if __name__ == "__main__":
-    intermediate = Intermediate(("127.0.0.1", 12345), ("127.0.0.1", 12346))
-    intermediate.process_packets()
+            except Exception as e:
+                print(f"Error while forwarding packet: {e}")
+                time.sleep(1)  # Allow some delay before retrying

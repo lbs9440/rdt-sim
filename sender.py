@@ -1,104 +1,109 @@
 import socket
 import struct
-import threading
+import argparse
 import time
 
 # Constants
-PACKET_SIZE = 52  # Max data per packet
-WINDOW_SIZE = 5   # Go-Back-N window size
-TIMEOUT = 2       # Retransmission timeout
-BUFFER_SIZE = 2048  # Buffer size for ACK reception
-END_OF_TRANSMISSION = 0xFFFFFF  # Special sequence number for last packet
+PACKET_SIZE = 52  # Adjust the size of your packets as needed
+BUFFER_SIZE = 2048
+TIMEOUT = 2  # Timeout for receiving ACKs (in seconds)
+MAX_PAYLOAD_SIZE = PACKET_SIZE - 4  # Reserve 4 bytes for the sequence number
+END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
 
 class Sender:
     def __init__(self, receiver_ip, receiver_port, data):
-        self.receiver_address = (receiver_ip, receiver_port)
-        self.data = data.encode()  # Convert string data to bytes
+        self.receiver_ip = receiver_ip
+        self.receiver_port = receiver_port
+        self.data = data.encode()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.settimeout(TIMEOUT)  # Set socket timeout
-        self.sequence_number = 0  # Start at 0
-        self.window_start = 0
-        self.acks_received = [False] * WINDOW_SIZE
-        self.packets = self.chunk_data()
-        self.lock = threading.Lock()
-        self.final_ack_received = False  # Flag to track if final ACK is received
+        self.sock.settimeout(TIMEOUT)  # Set timeout for receiving ACKs
+        self.seq_num = 0  # Sequence number for the first packet
+        self.window_size = 5  # The size of the sliding window
+        self.acks = [False] * self.window_size  # List to track which packets have been acknowledged
+        self.window_start = 0  # Start of the current window
 
-    def chunk_data(self):
-        """Splits data into fixed-size packets."""
-        return [self.data[i:i+PACKET_SIZE] for i in range(0, len(self.data), PACKET_SIZE)]
-
-    def create_packet(self, seq_num, data_chunk):
-        """Creates a packet with sequence number + data."""
-        return struct.pack('!I', seq_num) + data_chunk
-
-    def send_packet(self, seq_num):
-        """Sends a single packet."""
-        if seq_num < len(self.packets):
-            packet = self.create_packet(seq_num, self.packets[seq_num])
-            self.sock.sendto(packet, self.receiver_address)
-            print(f"Sent packet {seq_num}")
-        elif seq_num == len(self.packets):  # Send the last packet
-            packet = self.create_packet(END_OF_TRANSMISSION, b"")  # Send empty data for last packet
-            self.sock.sendto(packet, self.receiver_address)
-            print(f"Sent last packet {END_OF_TRANSMISSION}")
-
-    def handle_acks(self):
-        """Listens for ACKs and moves the sliding window."""
-        while not self.final_ack_received and self.window_start < len(self.packets) + 1:  # Include last packet in window
-            try:
-                ack_data, _ = self.sock.recvfrom(BUFFER_SIZE)
-                ack_num = struct.unpack('!I', ack_data)[0]
-                print(f"Received ACK {ack_num}")
-
-                # If we received an ACK for END_OF_TRANSMISSION, we stop the transmission
-                if ack_num == END_OF_TRANSMISSION:
-                    print("Received final ACK for END_OF_TRANSMISSION.")
-                    self.final_ack_received = True  # Mark final ACK as received
-                    break
-
-                if ack_num >= self.window_start:
-                    with self.lock:
-                        self.acks_received[ack_num % WINDOW_SIZE] = True
-
-                    while self.acks_received[self.window_start % WINDOW_SIZE]:
-                        with self.lock:
-                            self.acks_received[self.window_start % WINDOW_SIZE] = False
-                            self.window_start += 1
-            except socket.timeout:
-                self.retransmit_packets()
-
-    def retransmit_packets(self):
-        """Retransmits packets in case of timeout."""
-        if not self.final_ack_received:
-            print("Timeout! Retransmitting window...")
-            with self.lock:
-                for i in range(self.window_start, min(self.window_start + WINDOW_SIZE, len(self.packets))):
-                    print(f"Retransmitting packet {i}")
-                    self.send_packet(i)
-
-    # Start the thread without setting it as a daemon thread
     def send_data(self):
-        ack_thread = threading.Thread(target=self.handle_acks)  # Create the thread without daemon=True
-        ack_thread.start()
+        print("Sender started.")
+        total_packets = (len(self.data) + MAX_PAYLOAD_SIZE - 1) // MAX_PAYLOAD_SIZE  # Total number of packets
+        
+        while self.seq_num < total_packets:
+            # If the sequence number is within the window, send it
+            if self.seq_num < self.window_start + self.window_size:
+                packet_data = self.data[self.seq_num * MAX_PAYLOAD_SIZE: (self.seq_num + 1) * MAX_PAYLOAD_SIZE]
+                self.send_packet(self.seq_num, packet_data)
+            
+            # Wait for ACKs and shift the window
+            self.handle_acks()
+        
+        # Send the End-of-Transmission (EOT) packet after sending all data packets
+        self.send_packet(END_OF_TRANSMISSION, b"")
+        print("Sent End-of-Transmission (EOT) packet.")
 
-        while self.window_start < len(self.packets):  # Send all packets except the last one
-            # Send packets within the window
-            for i in range(self.window_start, min(self.window_start + WINDOW_SIZE, len(self.packets))):
-                self.send_packet(i)
-
-            # Wait for ACKs, then shift the window
-            time.sleep(0.5)
-
-        # Send the last packet once after all others are acknowledged
-        self.send_packet(len(self.packets))  # Send the last packet (END_OF_TRANSMISSION)
-
-        # Wait for the ACK for END_OF_TRANSMISSION
+        # Wait for final ACK of EOT packet
         self.handle_acks()
 
-        # Ensure the thread finishes before closing the socket
-        ack_thread.join()  # Wait for the ack_thread to finish
+        print("Data transmission complete.")
 
-        # Close the socket once all packets are sent and END_OF_TRANSMISSION ACK is received
-        print("Transmission complete.")
-        self.sock.close()
+    def send_packet(self, seq_num, data):
+        """Send a single packet."""
+        packet = struct.pack('!I', seq_num) + data
+        self.sock.sendto(packet, (self.receiver_ip, self.receiver_port))
+        print(f"Sent packet {seq_num}")
 
+    def handle_acks(self):
+        """Wait for ACKs and shift the window accordingly."""
+        while True:
+            try:
+                ack_data, _ = self.sock.recvfrom(BUFFER_SIZE)
+                ack_seq_num = struct.unpack('!I', ack_data[:4])[0]
+                print(f"Received ACK {ack_seq_num} for packet {ack_seq_num}")
+                
+                # Update the acknowledgment list and shift window
+                self.update_window(ack_seq_num)
+                break  # Exit after receiving a valid ACK
+            except (socket.timeout, BlockingIOError, IOError):
+                # If there's a timeout or I/O error, retransmit the next unacknowledged packet
+                self.retransmit_next_packet()
+
+    def retransmit_next_packet(self):
+        """Retransmit the next unacknowledged packet."""
+        for i in range(self.window_size):
+            packet_index = self.window_start + i
+            if not self.acks[i]:  # If the packet at this index hasn't been acknowledged
+                # Send the packet
+                time.sleep(2)
+                packet_data = self.data[packet_index * MAX_PAYLOAD_SIZE: (packet_index + 1) * MAX_PAYLOAD_SIZE]
+                self.send_packet(packet_index, packet_data)
+                print(f"Retransmitting packet {packet_index}")
+                break  # Retransmit only the next unacknowledged packet
+
+
+    def update_window(self, ack_seq_num):
+        """Shift the window based on the received ACK."""
+        shift = ack_seq_num - self.window_start + 1  # How much to shift the window based on the latest ACK
+        if shift > 0:
+            # Update the acknowledgment list
+            self.acks = [False] * self.window_size  # Reset ACK list for the new window
+            self.window_start += shift  # Move the start of the window forward
+            self.seq_num = self.window_start  # Set the new sequence number
+
+            # Stop if all packets are acknowledged
+            if self.window_start >= len(self.data):
+                self.sock.close()
+                return
+
+def main():
+    # Set up argument parsing for receiver IP, port, and data
+    parser = argparse.ArgumentParser(description="UDP Go-Back-N Sender")
+    parser.add_argument("--receiver-ip", type=str, required=True, help="Receiver's IP address")
+    parser.add_argument("--receiver-port", type=int, required=True, help="Receiver's port number")
+    parser.add_argument("--data", type=str, required=True, help="Data to send")
+
+    args = parser.parse_args()
+
+    # Create a Sender object and start sending data
+    sender = Sender(args.receiver_ip, args.receiver_port, args.data)
+    sender.send_data()
+
+if __name__ == "__main__":
+    main()
