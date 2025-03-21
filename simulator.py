@@ -1,35 +1,29 @@
+# simulator.py
 import argparse
-import time
-from client import Client
-from server import Server
+import threading
+from sender import Sender
+from receiver import Receiver
 
-class Simulator:
-    def __init__(self, filename, drop_rate=0, reorder=False, corrupt=False):
-        self.filename = filename
-        self.client = Client()
-        self.server = Server(output_file="output_" + filename)
-        self.drop_rate = drop_rate
-        self.reorder = reorder
-        self.corrupt = corrupt
-
-    def start(self):
-        print("[Simulator] Starting server...")
-        from threading import Thread
-        server_thread = Thread(target=self.server.start, daemon=True)
-        server_thread.start()
-        
-        time.sleep(1)  # Give the server time to start
-        print("[Simulator] Starting client...")
-        self.client.send_file(self.filename)
-
-    def stop(self):
-        self.client.close()
-        self.server.close()
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Reliable Data Transfer Simulator")
-    parser.add_argument("filename", help="File to transfer")
+def main():
+    """Parses arguments and starts sender/receiver threads."""
+    parser = argparse.ArgumentParser(description="UDP Go-Back-N Simulator")
+    parser.add_argument("--receiver-port", type=int, required=True, help="Port for receiver to listen on")
+    parser.add_argument("--sender-ip", type=str, required=True, help="Receiver IP address for sending data")
+    parser.add_argument("--sender-port", type=int, required=True, help="Receiver port for sending data")
+    parser.add_argument("--data", type=str, required=True, help="Data to send")
     args = parser.parse_args()
 
-    sim = Simulator(args.filename)
-    sim.start()
+    # Start receiver thread
+    receiver = Receiver(args.receiver_port)
+    receiver_thread = threading.Thread(target=receiver.start_receiving, daemon=True)
+    receiver_thread.start()
+
+    # Start sender thread
+    sender = Sender(args.sender_ip, args.sender_port, args.data)
+    sender_thread = threading.Thread(target=sender.send_data)
+    sender_thread.start()
+
+    sender_thread.join()  # Wait for sender to finish before exiting
+
+if __name__ == "__main__":
+    main()
