@@ -6,6 +6,19 @@ import argparse
 BUFFER_SIZE = 2048
 END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
 
+def calculate_checksum(data):
+    """Compute the checksum of the given data
+    
+    :param data: data to compute the checksum
+    :return checksum:
+    """
+    if len(data) % 2:
+        data += b'\x00' 
+    checksum = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
+    checksum = (checksum >> 16) + (checksum & 0xFFFF)
+    checksum = ~checksum & 0xFFFF
+    return checksum
+
 class Receiver:
     def __init__(self, listen_port):
         self.listen_port = listen_port
@@ -22,12 +35,19 @@ class Receiver:
         while True:
             try:
                 packet, sender_address = self.sock.recvfrom(BUFFER_SIZE)
-                seq_num = struct.unpack('!I', packet[:4])[0]
+                seq_num, checksum = struct.unpack('!IH', packet[:6])
+
+                if calculate_checksum(packet[6:]) != checksum:
+                    print(f"Received packet {seq_num} with incorrect checksum, ignoring...")
+                    continue
+
+                checksum = calculate_checksum(packet[6:])
                 
                 if seq_num == END_OF_TRANSMISSION:
                     # End of transmission, acknowledge the last packet and reassemble data
                     print("Received last packet, sending final ACK...")
-                    self.sock.sendto(struct.pack('!I', END_OF_TRANSMISSION), sender_address)
+                    checksum = calculate_checksum("ACK".encode())
+                    self.sock.sendto(struct.pack('!I', END_OF_TRANSMISSION) + struct.pack('!H', checksum), sender_address)
                     self.reassemble_data()
                     self.sock.close()  # Close the socket after transmission is complete
                     break
@@ -35,19 +55,21 @@ class Receiver:
                 if seq_num == self.expected_seq_num:
                     # Correct sequence number, store the data and send ACK
                     print(f"Received packet {seq_num}, sending ACK...")
-                    self.sock.sendto(struct.pack('!I', seq_num), sender_address)
+                    checksum = calculate_checksum("ACK".encode())
+                    self.sock.sendto(struct.pack('!I', seq_num) + struct.pack('!H', checksum), sender_address)
                     self.expected_seq_num += 1  # Expect the next sequence number
-                    self.received_data[seq_num] = packet[4:]  # Store the data part of the packet
+                    self.received_data[seq_num] = packet[6:]  # Store the data part of the packet
 
                 elif seq_num > self.expected_seq_num:
                     # Out-of-order packet, store for later
                     print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}")
-                    self.received_data[seq_num] = packet[4:]
+                    self.received_data[seq_num] = packet[6:]
                 
                 # elif an ack packet was lost, resend ack packet of data packet being sent
                 elif seq_num < self.expected_seq_num:
                     print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}, resending {seq_num}")
-                    self.sock.sendto(struct.pack('!I', seq_num), sender_address)
+                    checksum = calculate_checksum("ACK".encode())
+                    self.sock.sendto(struct.pack('!I', seq_num) + struct.pack('!H', checksum), sender_address)
 
                 
 

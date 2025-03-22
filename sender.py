@@ -4,11 +4,24 @@ import argparse
 import time
 
 # Constants
-PACKET_SIZE = 52  # Adjust the size of your packets as needed
+PACKET_SIZE = 50  # Adjust the size of your packets as needed
 BUFFER_SIZE = 2048
 TIMEOUT = 2  # Timeout for receiving ACKs (in seconds)
-MAX_PAYLOAD_SIZE = PACKET_SIZE - 4  # Reserve 4 bytes for the sequence number
+MAX_PAYLOAD_SIZE = PACKET_SIZE - 6  # Reserve 6 bytes for the sequence number and checksum
 END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
+
+def calculate_checksum(data):
+    """Compute the checksum of the given data
+    
+    :param data: data to compute the checksum
+    :return checksum:
+    """
+    if len(data) % 2:
+        data += b'\x00' 
+    checksum = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
+    checksum = (checksum >> 16) + (checksum & 0xFFFF)
+    checksum = ~checksum & 0xFFFF
+    return checksum
 
 class Sender:
     def __init__(self, receiver_ip, receiver_port, listening_port, data):
@@ -47,7 +60,8 @@ class Sender:
 
     def send_packet(self, seq_num, data):
         """Send a single packet."""
-        packet = struct.pack('!I', seq_num) + data
+        checksum = calculate_checksum(data)
+        packet = struct.pack('!I', seq_num) + struct.pack('!H', checksum) + data
         self.sock.sendto(packet, (self.receiver_ip, self.receiver_port))
         print(f"Sent packet {seq_num}")
 
@@ -56,7 +70,11 @@ class Sender:
         while True:
             try:
                 ack_data, _ = self.sock.recvfrom(BUFFER_SIZE)
-                ack_seq_num = struct.unpack('!I', ack_data[:4])[0]
+                ack_seq_num, checksum = struct.unpack('!IH', ack_data[:6])
+                if checksum != calculate_checksum("ACK".encode()):
+                    print(f"Received ACK {ack_seq_num} with incorrect checksum, ignoring...")
+                    continue
+
                 print(f"Received ACK {ack_seq_num} for packet {ack_seq_num}")
                 
                 # Update the acknowledgment list and shift window
