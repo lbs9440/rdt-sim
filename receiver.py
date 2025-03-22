@@ -43,6 +43,11 @@ class Receiver:
                     # Out-of-order packet, store for later
                     print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}")
                     self.received_data[seq_num] = packet[4:]
+                
+                # elif an ack packet was lost, resend ack packet of data packet being sent
+                elif seq_num < self.expected_seq_num:
+                    print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}, resending {seq_num}")
+                    self.sock.sendto(struct.pack('!I', seq_num), sender_address)
 
                 
 
