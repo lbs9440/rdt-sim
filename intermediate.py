@@ -29,7 +29,7 @@ class Intermediate:
             # Check for packets from sender
             self.handlePackets()
             if self.socket_closed:
-                print("Socket closed. Timeout in {TIMEOUT_TIME} seconds after not sending/receiving any packets...")
+                print(f"Socket closed. Timeout in {TIMEOUT_TIME} seconds after not sending/receiving any packets...")
                 break
             
     def handlePackets(self):
