@@ -20,13 +20,14 @@ def calculate_checksum(data):
     return checksum
 
 class Receiver:
-    def __init__(self, listen_port):
+    def __init__(self, listen_port, file=False):
         self.listen_port = listen_port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", listen_port))
         self.sock.settimeout(5)
         self.expected_seq_num = 0
         self.received_data = {}
+        self.isFile = file
 
     def start_receiving(self):
         """Listen for incoming packets and send ACKs."""
