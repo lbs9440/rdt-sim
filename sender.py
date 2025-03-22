@@ -11,12 +11,13 @@ MAX_PAYLOAD_SIZE = PACKET_SIZE - 4  # Reserve 4 bytes for the sequence number
 END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
 
 class Sender:
-    def __init__(self, receiver_ip, receiver_port, data):
+    def __init__(self, receiver_ip, receiver_port, listening_port, data):
         self.receiver_ip = receiver_ip
         self.receiver_port = receiver_port
         self.data = data.encode()
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.settimeout(TIMEOUT)  # Set timeout for receiving ACKs
+        self.sock.bind(("127.0.0.1", listening_port))
         self.seq_num = 0  # Sequence number for the first packet
         self.window_size = 5  # The size of the sliding window
         self.acks = [False] * self.window_size  # List to track which packets have been acknowledged
@@ -95,14 +96,14 @@ class Sender:
 def main():
     # Set up argument parsing for receiver IP, port, and data
     parser = argparse.ArgumentParser(description="UDP Go-Back-N Sender")
-    parser.add_argument("--receiver-ip", type=str, required=True, help="Receiver's IP address")
     parser.add_argument("--receiver-port", type=int, required=True, help="Receiver's port number")
+    parser.add_argument("--listening-port", type=int, required=True, help="This sender's port number")
     parser.add_argument("--data", type=str, required=True, help="Data to send")
 
     args = parser.parse_args()
 
     # Create a Sender object and start sending data
-    sender = Sender(args.receiver_ip, args.receiver_port, args.data)
+    sender = Sender("127.0.0.1", args.receiver_port, args.listening_port, args.data)
     sender.send_data()
 
 if __name__ == "__main__":
