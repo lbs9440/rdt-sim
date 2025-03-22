@@ -35,6 +35,8 @@ class Sender:
         self.window_size = 5  # The size of the sliding window
         self.acks = [False] * self.window_size  # List to track which packets have been acknowledged
         self.window_start = 0  # Start of the current window
+        self.eot_sent = False
+        self.shutoff = 0
 
     def send_data(self):
         print("Sender started.")
@@ -50,11 +52,19 @@ class Sender:
             self.handle_acks()
         
         # Send the End-of-Transmission (EOT) packet after sending all data packets
-        self.send_packet(END_OF_TRANSMISSION, b"")
-        print("Sent End-of-Transmission (EOT) packet.")
+        print("Sending End-of-Transmission (EOT) packet.")
+        for _ in range(3):  # Send EOT packet 3 times
+            self.send_packet(END_OF_TRANSMISSION, b"")
+            time.sleep(1)  # Wait 1 second before sending again
 
-        # Wait for final ACK of EOT packet
-        self.handle_acks()
+        self.eot_sent = True
+        self.shutoff = time.time() + 15
+
+        # Wait for final ACK of EOT packet, but don't block indefinitely
+        try:
+            self.handle_acks()
+        except socket.timeout:
+            print("No ACK received for EOT packet, ending transmission anyway.")
 
         print("Data transmission complete.")
 
@@ -69,6 +79,10 @@ class Sender:
         """Wait for ACKs and shift the window accordingly."""
         while True:
             try:
+                if time.time() > self.shutoff and self.eot_sent:
+                    self.sock.close()
+                    return
+                
                 ack_data, _ = self.sock.recvfrom(BUFFER_SIZE)
                 ack_seq_num, checksum = struct.unpack('!IH', ack_data[:6])
                 if checksum != calculate_checksum("ACK".encode()):

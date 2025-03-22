@@ -6,7 +6,7 @@ import random
 # Constants
 BUFFER_SIZE = 2048
 END_OF_TRANSMISSION = 0xFFFFFF
-TIMEOUT_TIME = 10
+TIMEOUT_TIME = 20
 
 class Intermediate:
     def __init__(self, listen_port, sender_ip, sender_port, receiver_ip, receiver_port, loss_prob, reorder_prob, corrupt_prob):
@@ -29,7 +29,7 @@ class Intermediate:
             # Check for packets from sender
             self.handlePackets()
             if self.socket_closed:
-                print(f"Socket closed. Timeout in {TIMEOUT_TIME} seconds after not sending/receiving any packets...")
+                print(f"Socket closed. Exiting...")
                 break
             
     def handlePackets(self):
@@ -39,24 +39,31 @@ class Intermediate:
                 self.handle_data_packet(packet)
             else:
                 self.handle_ack_packet(packet)
-        except socket.timeout:
+        except (socket.timeout, ConnectionResetError):
             self.sock.close()
             self.socket_closed = True
     
     def handle_data_packet(self, packet):
         """Handles data packets from sender and forwards them to receiver."""
+        original_packet = packet
         if random.random() < self.loss_prob:
-            print("Data packet lost (simulated).")
+            print("\nData packet lost (simulated).")
+            print(f"Contents of dropped packet: {original_packet}\n")
             return
         if random.random() < self.corrupt_prob:
-            print("Data packet corrupted (simulated).")
+            print("\nData packet corrupted (simulated).")
             packet = self.corrupt_packet(packet)
+            print(f"Original packet: {original_packet}")
+            print(f"Corrupted packet: {packet}")
+            print(f"Difference: {bytes([a ^ b for a, b in zip(original_packet, packet)])}\n")
         if random.random() < self.reorder_prob:
-            print("Data packet reordered (simulated).")
+            print("\nData packet reordered (simulated).")
             self.packet_buffer.append(packet)
             if len(self.packet_buffer) > 1:
                 # Swap last two packets
+                print(f"Original packet buffer: {self.packet_buffer}")
                 self.packet_buffer[-1], self.packet_buffer[-2] = self.packet_buffer[-2], self.packet_buffer[-1]
+                print(f"Reordered packet buffer: {self.packet_buffer}\n")
             for pkt in self.packet_buffer:
                 self.sock.sendto(pkt, (self.receiver_ip, self.receiver_port))
             self.packet_buffer.clear()
@@ -65,12 +72,17 @@ class Intermediate:
 
     def handle_ack_packet(self, packet):
         """Handles ACK packets from receiver and forwards them to sender."""
+        original_packet = packet
         if random.random() < self.loss_prob:
-            print("ACK lost (simulated).")
+            print("\nACK lost (simulated).")
+            print(f"Contents of dropped packet: {packet}\n")
             return
         if random.random() < self.corrupt_prob:
-            print("ACK corrupted (simulated).")
+            print("\nACK corrupted (simulated).")
             packet = self.corrupt_packet(packet)
+            print(f"Original packet: {original_packet}")
+            print(f"Corrupted packet: {packet}")
+            print(f"Difference: {bytes([a ^ b for a, b in zip(original_packet, packet)])}\n")
         self.sock.sendto(packet, (self.sender_ip, self.sender_port))
 
     def corrupt_packet(self, packet):
