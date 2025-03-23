@@ -1,10 +1,12 @@
 import socket
 import struct
 import argparse
+import time
 
 # Constants
 BUFFER_SIZE = 2048
 END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
+SOCKET_TIMEOUT = 10
 
 def calculate_checksum(data):
     """Compute the checksum of the given data
@@ -34,10 +36,11 @@ class Receiver:
         self.listen_port = listen_port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((receiver_ip, listen_port))
-        self.sock.settimeout(15)
+        self.sock.settimeout(2)
         self.expected_seq_num = 0
         self.received_data = {}
         self.sender_address = None
+        self.shutoff = -1
 
     def start_receiving(self):
         """Listen for incoming packets, validate checksums, and send acknowledgments.
@@ -51,6 +54,10 @@ class Receiver:
         while True:
             try:
                 packet, sender_address = self.sock.recvfrom(BUFFER_SIZE)
+                if time.time() > self.shutoff and self.shutoff != -1:
+                    print(f"No proper packet received for {SOCKET_TIMEOUT} seconds, ending transmission...")
+                    self.sock.close()
+                    return
                 self.sender_address = sender_address
                 seq_num, checksum = struct.unpack('!IH', packet[:6])
 
@@ -73,6 +80,7 @@ class Receiver:
                     self.sock.sendto(struct.pack('!I', seq_num) + struct.pack('!H', checksum), sender_address)
                     self.expected_seq_num += 1
                     self.received_data[seq_num] = packet[6:] 
+                    self.shutoff = time.time() + SOCKET_TIMEOUT
 
                 elif seq_num > self.expected_seq_num:
                     print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}")

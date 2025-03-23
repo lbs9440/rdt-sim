@@ -6,7 +6,7 @@ import time
 # Constants
 PACKET_SIZE = 50  # Adjust the size of your packets as needed
 BUFFER_SIZE = 2048
-TIMEOUT = 15  # Timeout for receiving ACKs (in seconds)
+TIMEOUT = 2  # Timeout for receiving ACKs (in seconds)
 MAX_PAYLOAD_SIZE = PACKET_SIZE - 6  # Reserve 6 bytes for the sequence number and checksum
 END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
 
@@ -84,8 +84,11 @@ class Sender:
         """
         checksum = calculate_checksum(data)
         packet = struct.pack('!I', seq_num) + struct.pack('!H', checksum) + data
-        self.sock.sendto(packet, (self.receiver_ip, self.receiver_port))
-        print(f"Sent packet {seq_num}")
+        try:
+            self.sock.sendto(packet, (self.receiver_ip, self.receiver_port))
+            print(f"Sent packet {seq_num}")
+        except socket.error as e:
+            print(f"Failed to send packet {seq_num}: {e}, retrying...")
 
     def handle_acks(self):
         """Handles acknowledgment reception and manages the sliding window."""
