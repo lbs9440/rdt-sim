@@ -12,6 +12,7 @@ class Client:
         self.server_ip = server_ip
         self.query = query
         self.filename = filename
+        self.reassembled_data = b''
 
     def run(self):
         if self.query:
@@ -20,9 +21,6 @@ class Client:
             self.send_file()
     
     def send_file(self):
-        # create a packet to send to the server that contains  the filename
-        encoded_filename = bytes(self.filename, 'utf-8')
-
         # read file into data variable
         with open(self.filename, 'rb') as f:
             data = f.read()
@@ -35,6 +33,20 @@ class Client:
 
         sender = Sender(self.server_ip, self.server_port, self.listen_port, data)
         sender.send_data()
+
+    def query_file(self):
+        sender = Sender(self.server_ip, self.server_port, self.listen_port, filename+"QUERY")
+        sender.send_data()
+        # ensure we received an ack from the server
+        sender.sock.close()
+
+        receiver = Receiver(self.listen_port, "127.0.0.1")
+        receiver.start_receiving()
+        self.reassembled_data = receiver.reassemble_data()
+        with open("Client_files/" + self.filename, "wb") as f:
+                f.write(self.reassembled_data)
+
+
         
 
 

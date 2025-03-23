@@ -12,6 +12,7 @@ class Server:
         self.server_ip = server_ip
         self.filename = ""
         self.reassembled_data = b''
+        self.sender_address = None
 
 
     def run(self):
@@ -19,9 +20,19 @@ class Server:
         receiver.start_receiving()
         self.filename = receiver.return_filename()
 
-        receiver = Receiver(self.server_port, self.server_ip)
-        receiver.start_receiving()
-        self.reassembled_data = receiver.reassemble_data()
+        if self.filename.endswith("QUERY"):
+            with open("Server_files/" + self.filename.removesuffix("QUERY"), "rb") as f:
+                data = f.read()
+            self.sender_address = receiver.sender_address
+            sender = Sender(self.sender_address[0], self.sender_address[1], self.server_port, data)
+            sender.send_data()
+
+        else:
+            receiver = Receiver(self.server_port, self.server_ip)
+            receiver.start_receiving()
+            self.reassembled_data = receiver.reassemble_data()
+            with open("Server_files/" + server.filename, "wb") as f:
+                f.write(server.reassembled_data)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Server")
@@ -31,6 +42,4 @@ if __name__ == "__main__":
 
     server = Server(args.server_port, args.server_ip)
     server.run()
-    # after it  runs call resemble data and wb to a new file in Server_files
-    with open("Server_files/" + server.filename, "wb") as f:
-        f.write(server.reassembled_data)
+    

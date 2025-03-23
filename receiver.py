@@ -27,6 +27,7 @@ class Receiver:
         self.sock.settimeout(15)
         self.expected_seq_num = 0
         self.received_data = {}
+        self.sender_address = None
 
     def start_receiving(self):
         """Listen for incoming packets and send ACKs."""
@@ -35,6 +36,7 @@ class Receiver:
         while True:
             try:
                 packet, sender_address = self.sock.recvfrom(BUFFER_SIZE)
+                self.sender_address = sender_address
                 seq_num, checksum = struct.unpack('!IH', packet[:6])
 
                 if calculate_checksum(packet[6:]) != checksum:

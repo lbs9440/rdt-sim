@@ -110,7 +110,7 @@ class Sender:
             packet_index = self.window_start + i
             if not self.acks[i]:  # If the packet at this index hasn't been acknowledged
                 # Send the packet
-                time.sleep(2)
+                time.sleep(1)
                 packet_data = self.data[packet_index * MAX_PAYLOAD_SIZE: (packet_index + 1) * MAX_PAYLOAD_SIZE]
                 self.send_packet(packet_index, packet_data)
                 print(f"Retransmitting packet {packet_index}")
