@@ -20,14 +20,13 @@ def calculate_checksum(data):
     return checksum
 
 class Receiver:
-    def __init__(self, listen_port, file=False):
+    def __init__(self, listen_port, receiver_ip):
         self.listen_port = listen_port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("127.0.0.1", listen_port))
-        self.sock.settimeout(5)
+        self.sock.bind((receiver_ip, listen_port))
+        self.sock.settimeout(15)
         self.expected_seq_num = 0
         self.received_data = {}
-        self.isFile = file
 
     def start_receiving(self):
         """Listen for incoming packets and send ACKs."""
@@ -49,7 +48,6 @@ class Receiver:
                     print("Received last packet, sending final ACK...")
                     checksum = calculate_checksum("ACK".encode())
                     self.sock.sendto(struct.pack('!I', END_OF_TRANSMISSION) + struct.pack('!H', checksum), sender_address)
-                    self.reassemble_data()
                     self.sock.close()  # Close the socket after transmission is complete
                     break
 
@@ -72,25 +70,31 @@ class Receiver:
                     checksum = calculate_checksum("ACK".encode())
                     self.sock.sendto(struct.pack('!I', seq_num) + struct.pack('!H', checksum), sender_address)
 
-                
-
             except socket.timeout:
                 pass  # Ignore timeouts, keep listening for packets
 
     def reassemble_data(self):
         """Reassemble and print complete data."""
         # Sort received data by sequence number
-        sorted_data = [self.received_data[i] for i in sorted(self.received_data.keys())]
-        complete_data = b''.join(sorted_data)  # Concatenate all the data parts
-        print("Reassembled data: ", complete_data.decode())  # Print the complete data as a string
+        complete_data = b''
+        for i in range(0, len(self.received_data)):
+            complete_data += self.received_data[i]
+        return complete_data # Print the complete data as a string
+    
+    def return_filename(self):
+        # returns the filename of the received data
+        print(self.received_data[0].decode('utf-8'))
+        return self.received_data[0].decode('utf-8')
+
 
 def main():
     parser = argparse.ArgumentParser(description="UDP Go-Back-N Receiver")
     parser.add_argument("--listen-port", type=int, required=True, help="Port to listen on")
+    parser.add_argument("--receiver-ip", type=str, default="127.0.0.1", help="IP address of the receiver")
     
     args = parser.parse_args()
 
-    receiver = Receiver(args.listen_port)
+    receiver = Receiver(args.listen_port, args.receiver_ip)
     receiver.start_receiving()
 
 if __name__ == "__main__":

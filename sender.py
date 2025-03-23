@@ -7,7 +7,7 @@ import os
 # Constants
 PACKET_SIZE = 50  # Adjust the size of your packets as needed
 BUFFER_SIZE = 2048
-TIMEOUT = 2  # Timeout for receiving ACKs (in seconds)
+TIMEOUT = 15  # Timeout for receiving ACKs (in seconds)
 MAX_PAYLOAD_SIZE = PACKET_SIZE - 6  # Reserve 6 bytes for the sequence number and checksum
 END_OF_TRANSMISSION = 0xFFFFFF  # Define EOT constant here
 
@@ -25,12 +25,13 @@ def calculate_checksum(data):
     return checksum
 
 class Sender:
-    def __init__(self, receiver_ip, receiver_port, listening_port, data, file=False):
+    def __init__(self, receiver_ip, receiver_port, listening_port, data):
         self.receiver_ip = receiver_ip
         self.receiver_port = receiver_port
-        self.isFile = file
-        if not self.isFile:
-            self.data = data.encode()
+        if not isinstance(data, bytes):
+            self.data = bytes(data, 'utf-8')
+        else:
+            self.data = data
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.settimeout(TIMEOUT)  # Set timeout for receiving ACKs
         self.sock.bind(("127.0.0.1", listening_port))
@@ -42,68 +43,32 @@ class Sender:
         self.shutoff = 0
 
     def send_data(self):
-        if self.isFile:
-            self.send_file_data(self)
-        else:
-            print("Sender started.")
-            total_packets = (len(self.data) + MAX_PAYLOAD_SIZE - 1) // MAX_PAYLOAD_SIZE  # Total number of packets
-            
-            while self.seq_num < total_packets:
-                # If the sequence number is within the window, send it
-                if self.seq_num < self.window_start + self.window_size:
-                    packet_data = self.data[self.seq_num * MAX_PAYLOAD_SIZE: (self.seq_num + 1) * MAX_PAYLOAD_SIZE]
-                    self.send_packet(self.seq_num, packet_data)
-                
-                # Wait for ACKs and shift the window
-                self.handle_acks()
-            
-            # Send the End-of-Transmission (EOT) packet after sending all data packets
-            print("Sending End-of-Transmission (EOT) packet.")
-            for _ in range(3):  # Send EOT packet 3 times
-                self.send_packet(END_OF_TRANSMISSION, b"")
-                time.sleep(1)  # Wait 1 second before sending again
-
-            self.eot_sent = True
-            self.shutoff = time.time() + 15
-
-            # Wait for final ACK of EOT packet, but don't block indefinitely
-            try:
-                self.handle_acks()
-            except socket.timeout:
-                print("No ACK received for EOT packet, ending transmission anyway.")
-
-            print("Data transmission complete.")
-
-    def send_file_data(self):
-        validFile = False
-        while not validFile:
-            self.file_path = self.data
-            if not os.path.isfile(self.file_path):
-                print(f"File {self.file_path} does not exist...")
-                continue
-            else:
-                validFile = True
-
-        # Get the file size
-        file_size = os.path.getsize(self.file_path)
-        print(f"Sending file: {self.file_path} (Size: {file_size} bytes)")
-
-        # Prepare the file header (file name and file size)
-        file_name = os.path.basename(self.file_path)
-        file_header = struct.pack('!I', len(file_name)) + file_name.encode() + struct.pack('!Q', file_size)
-
-        # Send the file header first
-        self.send_packet(self.seq_num, file_header)
-        self.seq_num += 1
+        print("Sender started.")
+        total_packets = (len(self.data) + MAX_PAYLOAD_SIZE - 1) // MAX_PAYLOAD_SIZE  # Total number of packets
         
-        # Read the file in chunks and send it
-        with open(self.file_path, 'rb') as file:
-            while True:
-                data = file.read(MAX_PAYLOAD_SIZE)
-                if not data:
-                    break  # End of file
-                self.send_packet(self.seq_num, data)
-                self.seq_num += 1
+        while self.seq_num < total_packets:
+            # If the sequence number is within the window, send it
+            if self.seq_num < self.window_start + self.window_size:
+                packet_data = self.data[self.seq_num * MAX_PAYLOAD_SIZE: (self.seq_num + 1) * MAX_PAYLOAD_SIZE]
+                self.send_packet(self.seq_num, packet_data)
+            
+            # Wait for ACKs and shift the window
+            self.handle_acks()
+        
+        # Send the End-of-Transmission (EOT) packet after sending all data packets
+        self.send_packet(END_OF_TRANSMISSION, b"")
+
+        self.eot_sent = True
+        self.shutoff = time.time() + 15
+
+        # Wait for final ACK of EOT packet, but don't block indefinitely
+        try:
+            self.handle_acks()
+        except socket.timeout:
+            print("No ACK received for EOT packet, ending transmission anyway.")
+
+        print("Data transmission complete.")
+    
 
     def send_packet(self, seq_num, data):
         """Send a single packet."""
@@ -122,11 +87,15 @@ class Sender:
                 
                 ack_data, _ = self.sock.recvfrom(BUFFER_SIZE)
                 ack_seq_num, checksum = struct.unpack('!IH', ack_data[:6])
-                if checksum != calculate_checksum("ACK".encode()):
+                if checksum != calculate_checksum(bytes("ACK", 'utf-8')):
                     print(f"Received ACK {ack_seq_num} with incorrect checksum, ignoring...")
                     continue
 
                 print(f"Received ACK {ack_seq_num} for packet {ack_seq_num}")
+
+                if self.eot_sent:
+                    self.sock.close()
+                    return
                 
                 # Update the acknowledgment list and shift window
                 self.update_window(ack_seq_num)
@@ -166,13 +135,14 @@ def main():
     # Set up argument parsing for receiver IP, port, and data
     parser = argparse.ArgumentParser(description="UDP Go-Back-N Sender")
     parser.add_argument("--receiver-port", type=int, required=True, help="Receiver's port number")
+    parser.add_argument("--receiver-ip", type=str, default="127.0.0.1", help="IP address of the receiver")
     parser.add_argument("--listening-port", type=int, required=True, help="This sender's port number")
     parser.add_argument("--data", type=str, required=True, help="Data to send")
 
     args = parser.parse_args()
 
     # Create a Sender object and start sending data
-    sender = Sender("127.0.0.1", args.receiver_port, args.listening_port, args.data)
+    sender = Sender(args.receiver_ip, args.receiver_port, args.listening_port, args.data)
     sender.send_data()
 
 if __name__ == "__main__":
