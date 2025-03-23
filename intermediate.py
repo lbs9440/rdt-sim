@@ -9,7 +9,23 @@ END_OF_TRANSMISSION = 0xFFFFFF
 TIMEOUT_TIME = 20
 
 class Intermediate:
+    """
+    An intermediate node that simulates network impairments such as
+    packet loss, reordering, and corruption between a sender and a receiver.
+    """
     def __init__(self, listen_port, sender_ip, sender_port, receiver_ip, receiver_port, loss_prob, reorder_prob, corrupt_prob):
+        """
+        Initializes the Intermediate node with specified network parameters.
+
+        :param listen_port: Port number to listen on for incoming packets.
+        :param sender_ip: IP address of the sender.
+        :param sender_port: Port number of the sender.
+        :param receiver_ip: IP address of the receiver.
+        :param receiver_port: Port number of the receiver.
+        :param loss_prob: If loss prob will be active.
+        :param reorder_prob: If reorder prob will be active.
+        :param corrupt_prob: If corrupt prob will be active.
+        """
         self.sender_ip = sender_ip
         self.sender_port = sender_port
         self.receiver_ip = receiver_ip
@@ -24,6 +40,9 @@ class Intermediate:
         self.packet_buffer = []
 
     def start(self):
+        """
+        Starts the intermediate node, continuously handling packets until terminated.
+        """
         print("Intermediate started.")
         while True:
             # Check for packets from sender
@@ -33,6 +52,9 @@ class Intermediate:
                 break
             
     def handlePackets(self):
+        """
+        Handles incoming packets, distinguishing between data and ACK packets.
+        """
         try:
             packet, addr = self.sock.recvfrom(BUFFER_SIZE)
             if addr[1] == self.sender_port:
@@ -44,7 +66,11 @@ class Intermediate:
             self.socket_closed = True
     
     def handle_data_packet(self, packet):
-        """Handles data packets from sender and forwards them to receiver."""
+        """
+        Handles incoming data packets, simulating packet loss, corruption, and reordering as specified.
+
+        :param packet: The incoming data packet.
+        """
         original_packet = packet
         if random.random() < self.loss_prob:
             print("\nData packet lost (simulated).")
@@ -71,7 +97,11 @@ class Intermediate:
             self.sock.sendto(packet, (self.receiver_ip, self.receiver_port))
 
     def handle_ack_packet(self, packet):
-        """Handles ACK packets from receiver and forwards them to sender."""
+        """
+        Handles incoming ACK packets, simulating packet loss and corruption as specified.
+
+        :param packet: The incoming ACK packet.
+        """
         original_packet = packet
         if random.random() < self.loss_prob:
             print("\nACK lost (simulated).")
@@ -86,15 +116,22 @@ class Intermediate:
         self.sock.sendto(packet, (self.sender_ip, self.sender_port))
 
     def corrupt_packet(self, packet):
-        """Corrupt a packet by flipping some bits."""
+        """Corrupts a packet by randomly flipping bits in it.
+
+        :param packet: The packet to corrupt.
+        :return: The corrupted packet.
+        """
         packet = bytearray(packet)
         for i in range(len(packet)):
-            if random.random() < 0.1:  # 10% chance to flip each byte
-                packet[i] ^= 0xFF  # Flip all bits in the byte
+            if random.random() < 0.1: 
+                packet[i] ^= 0xFF 
         return bytes(packet)
 
 
 def main():
+    """
+    Parses command-line arguments and starts the intermediate node.
+    """
     parser = argparse.ArgumentParser(description="UDP Intermediate Simulator")
     parser.add_argument("--sender-port", type=int, required=True, help="Sender's port number")
     parser.add_argument("--receiver-port", type=int, required=True, help="Receiver's port number")

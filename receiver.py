@@ -20,7 +20,17 @@ def calculate_checksum(data):
     return checksum
 
 class Receiver:
+    """Go-Back-N Receiver.
+
+    This class listens for incoming packets, verifies their integrity using checksums, 
+    acknowledges received packets, and handles packet loss and reordering.
+    """
     def __init__(self, listen_port, receiver_ip):
+        """Initialize the receiver.
+
+        :param listen_port: Port number to listen on.
+        :param receiver_ip: IP address of the receiver.
+        """
         self.listen_port = listen_port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((receiver_ip, listen_port))
@@ -30,7 +40,12 @@ class Receiver:
         self.sender_address = None
 
     def start_receiving(self):
-        """Listen for incoming packets and send ACKs."""
+        """Listen for incoming packets, validate checksums, and send acknowledgments.
+
+        This method continuously listens for packets, processes them in sequence,
+        and acknowledges correctly received packets. It also handles out-of-order 
+        packets and retransmission scenarios.
+        """
         print(f"Receiver listening on port {self.listen_port}...")
 
         while True:
@@ -46,50 +61,52 @@ class Receiver:
                 checksum = calculate_checksum(packet[6:])
                 
                 if seq_num == END_OF_TRANSMISSION:
-                    # End of transmission, acknowledge the last packet and reassemble data
                     print("Received last packet, sending final ACK...")
                     checksum = calculate_checksum("ACK".encode())
                     self.sock.sendto(struct.pack('!I', END_OF_TRANSMISSION) + struct.pack('!H', checksum), sender_address)
-                    self.sock.close()  # Close the socket after transmission is complete
+                    self.sock.close()
                     break
 
                 if seq_num == self.expected_seq_num:
-                    # Correct sequence number, store the data and send ACK
                     print(f"Received packet {seq_num}, sending ACK...")
                     checksum = calculate_checksum("ACK".encode())
                     self.sock.sendto(struct.pack('!I', seq_num) + struct.pack('!H', checksum), sender_address)
-                    self.expected_seq_num += 1  # Expect the next sequence number
-                    self.received_data[seq_num] = packet[6:]  # Store the data part of the packet
+                    self.expected_seq_num += 1
+                    self.received_data[seq_num] = packet[6:] 
 
                 elif seq_num > self.expected_seq_num:
-                    # Out-of-order packet, store for later
                     print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}")
                     self.received_data[seq_num] = packet[6:]
                 
-                # elif an ack packet was lost, resend ack packet of data packet being sent
                 elif seq_num < self.expected_seq_num:
                     print(f"Received out-of-order packet {seq_num}, expected {self.expected_seq_num}, resending {seq_num}")
                     checksum = calculate_checksum("ACK".encode())
                     self.sock.sendto(struct.pack('!I', seq_num) + struct.pack('!H', checksum), sender_address)
 
             except socket.timeout:
-                pass  # Ignore timeouts, keep listening for packets
+                pass
 
     def reassemble_data(self):
-        """Reassemble and print complete data."""
-        # Sort received data by sequence number
+        """Reassemble received packets into a complete data sequence for files.
+
+        :return: The complete data reconstructed from received packets.
+        """
         complete_data = b''
         for i in range(0, len(self.received_data)):
             complete_data += self.received_data[i]
-        return complete_data # Print the complete data as a string
+        return complete_data 
     
     def return_filename(self):
-        # returns the filename of the received data
+        """Retrieve the filename from the received data.
+
+        :return: The filename extracted from the first received packet.
+        """
         print(self.received_data[0].decode('utf-8'))
         return self.received_data[0].decode('utf-8')
 
 
 def main():
+    """Parse command-line arguments and start the receiver."""
     parser = argparse.ArgumentParser(description="UDP Go-Back-N Receiver")
     parser.add_argument("--listen-port", type=int, required=True, help="Port to listen on")
     parser.add_argument("--receiver-ip", type=str, default="127.0.0.1", help="IP address of the receiver")
